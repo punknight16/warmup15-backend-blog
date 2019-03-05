@@ -1,23 +1,61 @@
 var http = require('http');
 
 var data = {
+	cred_data: [
+		{cred_id: 'c0'}
+	],
+	goal_data: [
+		{goal_id: 'g1'}
+	],
+	link_data: [
+		{goal_id: 'g1', cred_id: 'c0'}
+	],
 	sprint_data: [
-		{sprint_id: 's0', article_id: 'a1'}
+		{sprint_id: 's0', article_id: 'a1', cred_id: 'c0', goal_id: 'g1'}
 	],
 	article_data: [
-		{article_id: 'a0', parent_id: null, sprint_id: 's0'},
-		{article_id: 'a1', parent_id: 'a0', sprint_id: 's0'}
-	]
+		{article_id: 'a0', parent_id: null, sprint_id: 's0', text: 'first #career'},
+		{article_id: 'a1', parent_id: 'a0', sprint_id: 's0', text: 'second #career'}
+	],
+	tag_data: [
+		{tag_name: 'career', goal_id: 'g1', sprint_id: 's0', article_id: 'a1'},
+		{tag_name: 'career', goal_id: 'g1', sprint_id: 's0', article_id: 'a2'}
+	],
+	ledger_data: []
 }
 
 var server = http.createServer(function(req, res){
 	switch (req.url){
-		case '/list':
+		case '/index':
+			res.write('<html>')
+			res.write('<ul>');
+				res.write("<li style='list-style-type: none'>/home - list the goals of logged_in user to prioritize</li>");
+				res.write("<li style='margin-left:20px'>./#id to open a sprint or view it already exists</li>")
+				res.write("<li style='margin-left:20px'>./?tags= to search for goals that have associated article #\'s</li>");
+			res.write('</ul>');
+			res.write('<ul>');
+				res.write("<li style='list-style-type: none'>/browse - list goals of all to add them to your home</li>");
+				res.write("<li style='margin-left:20px'>./#id to inspect all plans (1st articles) associated with that goal</li>");
+				res.write("<li style='margin-left:20px'>./?tags= to search for goals that have associated article #\'s</li>");
+			res.write('</ul>');
+			res.write('<ul>');
+				res.write("<li style='list-style-type: none'>/favorites - list sprints by hearts to send them hearts</li>");
+				res.write("<li style='margin-left:20px'>./#id to inspect a sprint</li>")
+			res.write('</ul>');
+			res.write('<ul>');
+				res.write("<li style='list-style-type: none'>/user - list users BY_activity_per_day</li>");
+				res.write("<li style='margin-left:20px'>./#id to inspect bookmarked goals of a user</li>")
+			res.write('</ul>');
+			res.end('</html>');
+			break;
+		case '/search':
+			console.log('req.method');
 			switch(req.method){
 				case 'GET':
-					res.end('I need a sprint_id');
+					res.end('I need a search tag');
 					break;
 				case 'POST':
+					//receive post data
 					var post_str = '';
 					var post_obj = {};
 					var split_arr = [];
@@ -26,6 +64,54 @@ var server = http.createServer(function(req, res){
 						post_str+=chunk;
 					});
 					req.on('end', function(){
+						//might have to do some regular expressions here for # and @
+						post_str.split('&').map((item)=>{
+							split_arr = item.split('=');
+							post_obj[split_arr[0]] = split_arr[1];
+						});
+						//for each search term
+						if(post_obj.hasOwnProperty('q')){
+							var search_term_arr = post_obj.q.split('+');
+							var reduced_tags = {};
+							for (var i = data.tag_data.length - 1; i >= 0; i--) {
+								if(search_term_arr.indexOf(data.tag_data[i].tag_name)>-1){
+									if(typeof reduced_tags[data.tag_data[i].goal_id]=='undefined'){
+										reduced_tags[data.tag_data[i].goal_id] = 1;	
+									} else {
+										reduced_tags[data.tag_data[i].goal_id]++
+									}
+								}
+							};
+							var result_arr = [];
+							for (k in reduced_tags){
+								result_arr.push({goal_id: k, total_tags: reduced_tags[k]})
+							}
+							res.end(JSON.stringify(result_arr));
+						} else {
+							res.end('no tags received');
+						}
+					});
+					break;
+				default:
+					res.end('bad list request');
+			}
+			break;
+		case '/inspect':
+			switch(req.method){
+				case 'GET':
+					res.end('I need a sprint_id');
+					break;
+				case 'POST':
+					//receive post data
+					var post_str = '';
+					var post_obj = {};
+					var split_arr = [];
+					req.setEncoding = 'utf8';
+					req.on('data', function(chunk){
+						post_str+=chunk;
+					});
+					req.on('end', function(){
+						//might have to do some regular expressions here for # and @
 						post_str.split('&').map((item)=>{
 							split_arr = item.split('=');
 							post_obj[split_arr[0]] = split_arr[1];
@@ -107,7 +193,7 @@ var server = http.createServer(function(req, res){
 					split_arr = item.split('=');
 					post_obj[split_arr[0]] = split_arr[1];
 				});
-				//create the article and update the sprint
+				//create the article, a tag for each#, and update the sprint
 				if(post_obj.hasOwnProperty('text') && post_obj.hasOwnProperty('sprint_id')){
 					//adding the article obj and updating the sprint_obj should be atomic
 					var sprint_obj = data.sprint_data.find((item)=>{
@@ -122,7 +208,20 @@ var server = http.createServer(function(req, res){
 					};
 					data.article_data.push(article_obj);
 					sprint_obj.article_id = article_id;
-					res.end('created: '+article_id);
+					//here is the tag stuff
+					var myRegexp = /#(\S+)/g, result;
+					var counter = 0;
+					while (result = myRegexp.exec(post_obj.text)) {
+					   var tag_obj = {
+					   	tag_name: result[1],
+					   	goal_id: sprint_obj.goal_id,  
+					   	sprint_id: post_obj.sprint_id, 
+					   	article_id: article_id
+					   }
+					   data.tag_data.push(tag_obj);
+					   counter++;
+					}
+					res.end('created: '+article_id+'with '+ counter+ ' #s');
 				} else {
 					res.end('need text and sprint_id to add article');
 				}
